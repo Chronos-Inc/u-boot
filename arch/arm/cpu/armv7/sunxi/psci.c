@@ -311,3 +311,9 @@ void __secure psci_arch_init(void)
 	reg &= ~BIT(0); /* Secure mode */
 	cp15_write_scr(reg);
 }
+
+s32 __secure smc_ar100_reset(u32 __always_unused unused, u32 val)
+{
+	if(val <= 1) writel(val, SUNXI_CPUCFG_BASE);
+	return readl(SUNXI_CPUCFG_BASE);
+}
