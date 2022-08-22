@@ -30,6 +30,12 @@
 
 #include <linux/compiler.h>
 
+#ifdef CONFIG_SPL_BUILD
+#include "tinf.h"
+#include "arisc-fw.h"
+#endif
+
+
 struct fel_stash {
 	uint32_t sp;
 	uint32_t lr;
@@ -402,7 +408,7 @@ void board_init_f(ulong dummy)
 	gpio_direction_output(rs232Gpio, bootFromSpiFlash || buttonPressed ? 0 : 1); //button enables RS232
 	gpio_direction_output(bleNReset, 0); //switch off BLE module
 
-	mdelay(1); //wait for RS232 converter powerup
+	__udelay(1000); //wait for RS232 converter powerup
 	preloader_console_init();
 
 	void *sramA2 = (void*)SRAM_A2_ADDR;
@@ -417,7 +423,7 @@ void board_init_f(ulong dummy)
 
 	*arisc_vcore = 5; // VCore = 0.7V+N*0.1V, default = 4 (1.1V)
 	*arisc_running = 0;
-	int load_res = 1; //tinf_uncompress(sramA2, &sramA2Len, arisc_fw_deflate, sizeof(arisc_fw_deflate));
+	int load_res = tinf_uncompress(sramA2, &sramA2Len, arisc_fw_deflate, sizeof(arisc_fw_deflate));
 	printf("SPL: AR100 FW loaded: %u bytes, err: %d, core at 1.2V", sramA2Len, load_res);
 	if(load_res == 0)
 	{

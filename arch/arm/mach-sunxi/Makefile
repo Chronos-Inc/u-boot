@@ -6,6 +6,7 @@
 # (C) Copyright 2000-2003
 # Wolfgang Denk, DENX Software Engineering, wd@denx.de.
 
+obj-y	+= tinflate.o
 obj-y	+= board.o
 obj-y	+= clock.o
 obj-y	+= cpu_info.o
