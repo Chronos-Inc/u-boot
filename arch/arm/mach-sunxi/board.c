@@ -343,10 +343,107 @@ u32 spl_boot_device(void)
 	return sunxi_get_boot_device();
 }
 
+
+#pragma pack(push, 1)
+typedef struct
+{
+  union
+  {
+    uint8_t enabled;
+    struct
+    {
+      uint8_t hold100ms : 4;
+      uint8_t fade100ms : 4;
+    };
+  };
+  uint8_t blue;
+  uint8_t green;
+  uint8_t red;
+} color_t;
+#pragma pack(pop)
+
+#define SRAM_A2_SIZE            (48*1024)
+#define SRAM_A2_ADDR            0x00040000
+#define ARISC_COMM_SIZE         2048
+#define ARISC_COMM_ADDR         (SRAM_A2_ADDR + SRAM_A2_SIZE - ARISC_COMM_SIZE)
+
+#define ARISC_OVERRIDE_COLOR	(ARISC_COMM_ADDR + 0x00)	//4b800
+#define ARISC_JUMP_TO_COLOR		(ARISC_COMM_ADDR + 0x04)
+#define ARISC_FADE_TO_COLOR		(ARISC_COMM_ADDR + 0x08)
+#define ARISC_COLOR_TABLE		(ARISC_COMM_ADDR + 0x10)	//4b810
+#define ARISC_COLOR_COUNT		8
+#define ARISC_COLOR_TABLE_SIZE	(sizeof(color_t)*ARISC_COLOR_COUNT)
+
+#define ARISC_WATCHDOG_ENABLED	(ARISC_COMM_ADDR + 0x100) 	//4b900
+#define ARISC_WATCHDOG_RESET	(ARISC_COMM_ADDR + 0x104)	//4b904
+#define ARISC_WATCHDOG_TIMEOUT	(ARISC_COMM_ADDR + 0x108)	//4b908
+#define ARISC_WATCHDOG_TIMEOUT_DEFAULT 60
+#define ARISC_BUTTON_PRESSED	(ARISC_COMM_ADDR + 0x140) 	//4b940
+
 void board_init_f(ulong dummy)
 {
 	spl_init();
+	/* SPL loader before first print */
+
+	gpio_direction_output(SUNXI_GPA(20), 0); //XR819 1.8V LDO = off
+	gpio_direction_output(SUNXI_GPL(7), 0);  //XR819 RSTN=0 (power off)
+
+	unsigned buttonGpio = SUNXI_GPA(11);
+	unsigned redLedGpio = SUNXI_GPA(17);
+	unsigned rs232Gpio = SUNXI_GPA(16);
+	unsigned bleNReset = SUNXI_GPA(10);
+	unsigned greenLedGpio = SUNXI_GPL(10);
+	gpio_direction_output(redLedGpio, 1); //turn on RED led = bootloader active
+
+	gpio_direction_input(buttonGpio);
+	bool buttonPressed = gpio_get_value(buttonGpio) == 0;
+	bool bootFromSpiFlash = sunxi_get_boot_device() == BOOT_DEVICE_SPI;
+	gpio_direction_output(greenLedGpio, bootFromSpiFlash || buttonPressed ? 1 : 0); //button enables GREEN led
+	gpio_direction_output(rs232Gpio, bootFromSpiFlash || buttonPressed ? 0 : 1); //button enables RS232
+	gpio_direction_output(bleNReset, 0); //switch off BLE module
+
+	mdelay(1); //wait for RS232 converter powerup
 	preloader_console_init();
+
+	void *sramA2 = (void*)SRAM_A2_ADDR;
+	unsigned int sramA2Len = SRAM_A2_SIZE;
+	volatile uint32_t *arisc_running = (uint32_t*)(0x01f01c00);
+	volatile uint32_t *arisc_vcore = (uint32_t*)(0x01f00190);
+	volatile uint32_t *jumpToColor = (uint32_t*)(ARISC_JUMP_TO_COLOR);
+	volatile color_t *forceColor = (color_t*)(ARISC_OVERRIDE_COLOR);
+	volatile color_t *colors = (color_t*)(ARISC_COLOR_TABLE);
+	volatile uint32_t *wdEnable = (uint32_t*)(ARISC_WATCHDOG_ENABLED);
+	volatile uint32_t *wdTimeout = (uint32_t*)(ARISC_WATCHDOG_TIMEOUT);
+
+	*arisc_vcore = 5; // VCore = 0.7V+N*0.1V, default = 4 (1.1V)
+	*arisc_running = 0;
+	int load_res = 1; //tinf_uncompress(sramA2, &sramA2Len, arisc_fw_deflate, sizeof(arisc_fw_deflate));
+	printf("SPL: AR100 FW loaded: %u bytes, err: %d, core at 1.2V", sramA2Len, load_res);
+	if(load_res == 0)
+	{
+		*jumpToColor = 0;
+		*arisc_running = 1;
+		while(*jumpToColor == 0); //wait for ARISC initialization
+
+		if(bootFromSpiFlash)
+			*forceColor = (color_t) { .red = 180, .green = 0, .blue = 0, .enabled = true };
+		else
+		{
+			if(buttonPressed)
+			{
+				colors[0] = (color_t) { .red = 110, .green = 0, .blue = 70, .hold100ms = 5, .fade100ms = 2 };
+				colors[1] = (color_t) { .red = 30, .green = 0, .blue = 25, .hold100ms = 1, .fade100ms = 2 };
+			}
+			else
+			{
+				colors[0] = (color_t) { .red = 110, .green = 60, .blue = 0, .hold100ms = 5, .fade100ms = 2 };
+				colors[1] = (color_t) { .red = 30, .green = 15, .blue = 0, .hold100ms = 1, .fade100ms = 2 };
+			}
+		}
+
+		*wdTimeout = 10*60;
+		*wdEnable = 1;
+	}
 
 #if CONFIG_IS_ENABLED(I2C) && CONFIG_IS_ENABLED(SYS_I2C_LEGACY)
 	/* Needed early by sunxi_board_init if PMU is enabled */

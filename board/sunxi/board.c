@@ -871,6 +871,31 @@ int board_late_init(void)
 	usb_ether_init();
 #endif
 
+	//u32 redLedGpio = SUNXI_GPA(17);
+	u32 greenLedGpio = SUNXI_GPL(10);
+
+	u32 bank = GPIO_BANK(greenLedGpio);
+	u32 num = GPIO_NUM(greenLedGpio);
+	struct sunxi_gpio *pio = BANK_TO_GPIO(bank);
+	u32 dat = readl(&pio->dat);
+	dat >>= num;
+	u32 buttonPressed = dat & 0x1;
+
+	if(buttonPressed)
+	{
+		env_set("bootdelay", "2");
+		env_set("boot_targets", "usb0 mmc0");
+		env_set("extraboardargs", "mce.button=true");
+	}
+	else
+	{
+		env_set("bootdelay", "0");
+		env_set("extraboardargs", "mce.button=false");
+	}
+
+	char *env_targets = env_get("boot_targets");
+	printf("Chronos DBG: board_late_init: button( %s ), boot order( %s )\n", buttonPressed ? "Y" : "N", env_targets);
+
 	return 0;
 }
 
